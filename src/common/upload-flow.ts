@@ -684,6 +684,27 @@ export async function performUpload(
           break
         }
 
+        case 'pieceSyncStatus:retryUpdate': {
+          flow.addOperation(
+            'piece-sync',
+            `Waiting for advertisement to be indexed (attempt ${event.data.providerAttempt}/${event.data.providerMaxAttempts})`
+          )
+          break
+        }
+        case 'pieceSyncStatus:complete': {
+          flow.completeOperation('piece-sync', 'Advertisement confirmed indexed', { type: 'success' })
+          break
+        }
+        case 'pieceSyncStatus:failed': {
+          flow.completeOperation('piece-sync', 'Advertisement not confirmed indexed in time.', {
+            type: 'warning',
+            details: {
+              title: 'Reason',
+              content: [pc.gray(event.data.error.message)],
+            },
+          })
+          break
+        }
         case 'ipniProviderResults:retryUpdate': {
           const attempt = event.data.attempt ?? (event.data.retryCount === 0 ? 1 : event.data.retryCount + 1)
           flow.addOperation(
@@ -717,6 +738,21 @@ export async function performUpload(
               content: [pc.gray(`IPNI provider records for this SP does not exist for the provided root CID`)],
             },
           })
+          break
+        }
+        case 'indexingConfirmation:mismatch': {
+          flow.addOperation('ipni-mismatch', 'Checking indexer confirmation against a direct CID lookup')
+          flow.completeOperation(
+            'ipni-mismatch',
+            'Indexer confirmed the advertisement as indexed, but a direct CID lookup still disagrees.',
+            {
+              type: 'warning',
+              details: {
+                title: 'Indexer mismatch',
+                content: [pc.gray(event.data.error.message)],
+              },
+            }
+          )
           break
         }
         default: {

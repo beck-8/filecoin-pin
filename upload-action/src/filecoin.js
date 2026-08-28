@@ -287,6 +287,26 @@ export async function uploadCarToFilecoin(synapse, carPath, ipfsRootCid, options
           )
           break
         }
+        case 'pieceSyncStatus:retryUpdate': {
+          console.log(`Piece sync status check attempt #${event.data.providerAttempt}...`)
+          break
+        }
+        case 'pieceSyncStatus:complete': {
+          console.log('✓ Advertisement confirmed indexed')
+          break
+        }
+        case 'pieceSyncStatus:failed': {
+          console.log('Advertisement not confirmed indexed in time')
+          console.log(`Error: ${event.data.error.message}`)
+          break
+        }
+        case 'indexingConfirmation:mismatch': {
+          console.log(
+            'Warning: indexer confirmed the advertisement as indexed, but a direct CID lookup still disagrees'
+          )
+          console.log(`Error: ${event.data.error.message}`)
+          break
+        }
         case 'ipniProviderResults:retryUpdate': {
           const attempt = event.data.attempt ?? (event.data.retryCount === 0 ? 1 : event.data.retryCount + 1)
           console.log(`IPNI provider results check attempt #${attempt}...`)
