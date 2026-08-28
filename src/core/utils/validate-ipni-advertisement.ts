@@ -107,11 +107,12 @@ export interface CheckIpniIndexerOptions {
   onProgress?: ProgressEventHandler<ValidateIPNIProgressEvents>
 
   /**
-   * IPNI indexer URL to query for provider records.
-   *
-   * @default 'https://cid.contact'
+   * IPNI indexer URL to query for provider records. Required — this function has no way
+   * to know whether it's safe to poll the given indexer patiently (e.g. cid.contact
+   * negative-caches misses for minutes, see content-routing-faq.md), so callers must
+   * decide explicitly rather than inherit a default that may not fit their situation.
    */
-  ipniIndexerUrl?: string | undefined
+  ipniIndexerUrl: string
 
   /**
    * Child blocks that must also be validated against expected providers.
@@ -137,10 +138,10 @@ export interface CheckIpniIndexerOptions {
  * @param options - Options for the check
  * @returns True if the IPNI announce succeeded, false otherwise
  */
-export async function checkIpniIndexer(ipfsRootCid: CID, options?: CheckIpniIndexerOptions): Promise<boolean> {
+export async function checkIpniIndexer(ipfsRootCid: CID, options: CheckIpniIndexerOptions): Promise<boolean> {
   const delayMs = options?.delayMs ?? 5000
   const maxAttempts = options?.maxAttempts ?? 20
-  const ipniIndexerUrl = options?.ipniIndexerUrl ?? 'https://cid.contact'
+  const ipniIndexerUrl = options.ipniIndexerUrl
   const expectedProviders = options?.expectedProviders?.filter((provider) => provider != null) ?? []
   const { uriToServiceUrl, skippedProviderCount } = deriveExpectedUris(expectedProviders, options?.logger)
   const expectedUris = new Set(uriToServiceUrl.keys())
@@ -208,6 +209,16 @@ export async function checkIpniIndexer(ipfsRootCid: CID, options?: CheckIpniInde
     throw error
   }
 }
+
+/** @deprecated Use {@link CheckIpniIndexerOptions}. */
+export type WaitForIpniProviderResultsOptions = CheckIpniIndexerOptions
+
+/**
+ * @deprecated Use {@link checkIpniIndexer} — same behavior, renamed because it's now one
+ * of two exports here rather than the sole post-upload check. `ipniIndexerUrl` is now
+ * required (previously defaulted to filecoinpin.contact, now retired): pass it explicitly.
+ */
+export const waitForIpniProviderResults = checkIpniIndexer
 
 async function checkIpniIndexerForCid(
   cid: CID,
@@ -638,9 +649,23 @@ export async function waitForIndexingConfirmation(
     )
 
     const retryCount = totalChecks > 0 ? totalChecks - 1 : 0
-    options?.onProgress?.({ type: 'pieceSyncStatus:complete', data: { result: true, retryCount } })
+    try {
+      options?.onProgress?.({ type: 'pieceSyncStatus:complete', data: { result: true, retryCount } })
+    } catch (callbackError) {
+      options?.logger?.warn(
+        { error: callbackError },
+        'Error in consumer onProgress callback for pieceSyncStatus complete event'
+      )
+    }
   } catch (error) {
-    options?.onProgress?.({ type: 'pieceSyncStatus:failed', data: { error: error as Error } })
+    try {
+      options?.onProgress?.({ type: 'pieceSyncStatus:failed', data: { error: error as Error } })
+    } catch (callbackError) {
+      options?.logger?.warn(
+        { error: callbackError },
+        'Error in consumer onProgress callback for pieceSyncStatus failed event'
+      )
+    }
     // No fallback: step 1 already patiently polled the indexer via Curio (ground truth).
     throw error
   } finally {
@@ -658,12 +683,18 @@ export async function waitForIndexingConfirmation(
   try {
     return await checkIpniIndexer(ipfsRootCid, indexerOptions)
   } catch (error) {
+    options?.signal?.throwIfAborted()
+
     const mismatch = new IndexerMismatchError(
       `Curio reported piece "${pieceCid.toString()}" as synced, but the confirming cid.contact check still failed: ${getErrorMessage(error)}`,
       { cause: error }
     )
     options?.logger?.error({ error: mismatch }, mismatch.message)
-    options?.onProgress?.({ type: 'indexingConfirmation:mismatch', data: { error: mismatch } })
+    try {
+      options?.onProgress?.({ type: 'indexingConfirmation:mismatch', data: { error: mismatch } })
+    } catch (callbackError) {
+      options?.logger?.warn({ error: callbackError }, 'Error in consumer onProgress callback for mismatch event')
+    }
     throw mismatch
   }
 }
@@ -673,13 +704,16 @@ function buildIndexerOptions(
   expectedProviders: PDPProvider[],
   maxAttempts: number,
   delayMs: number,
-  // Suppresses the inner ipniProviderResults:failed when the caller re-wraps it itself.
+  // Suppresses the inner ipniProviderResults:failed when the caller reports the same
+  // failure itself with more context — see the mismatch branch below.
   suppressFailedEvent = false
 ): CheckIpniIndexerOptions {
   const indexerOptions: CheckIpniIndexerOptions = {
     maxAttempts,
     delayMs,
-    ipniIndexerUrl: options?.ipniIndexerUrl,
+    // Safe to default here: by the time this is called, either every provider already
+    // confirmed synced, or there's nothing else safer to fall back to.
+    ipniIndexerUrl: options?.ipniIndexerUrl ?? 'https://cid.contact',
     expectedProviders,
     childBlocks: options?.childBlocks,
     signal: options?.signal,

@@ -741,17 +741,12 @@ export async function performUpload(
           break
         }
         case 'indexingConfirmation:mismatch': {
-          flow.addOperation('ipni-mismatch', 'Checking indexer confirmation against a direct CID lookup')
-          flow.completeOperation(
-            'ipni-mismatch',
-            'Indexer confirmed the advertisement as indexed, but a direct CID lookup still disagrees.',
-            {
-              type: 'warning',
-              details: {
-                title: 'Indexer mismatch',
-                content: [pc.gray(event.data.error.message)],
-              },
-            }
+          // The underlying ipniProviderResults:failed is suppressed for this call, so
+          // 'ipni' never gets completed on its own — discard it before reporting here.
+          flow.discardOperation('ipni')
+          flow.printSection(
+            pc.yellow('⚠ Storage provider reported sync, but a direct indexer lookup still disagrees'),
+            [pc.gray(event.data.error.message)]
           )
           break
         }

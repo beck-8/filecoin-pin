@@ -301,9 +301,7 @@ export async function uploadCarToFilecoin(synapse, carPath, ipfsRootCid, options
           break
         }
         case 'indexingConfirmation:mismatch': {
-          console.log(
-            'Warning: indexer confirmed the advertisement as indexed, but a direct CID lookup still disagrees'
-          )
+          console.log('Warning: storage provider reported sync, but a direct indexer lookup still disagrees')
           console.log(`Error: ${event.data.error.message}`)
           break
         }
